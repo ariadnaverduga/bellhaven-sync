@@ -1,0 +1,41 @@
+# Runs the Bellhaven sync every morning.
+# The pipeline only QUEUES proposals; nothing is written to the CRM
+# until a reviewer approves it in the local review app.
+name: Daily Bellhaven sync
+
+on:
+  schedule:
+    - cron: "0 11 * * *"   # 11:00 UTC = 5-6am Central, before the sales team starts
+  workflow_dispatch:        # allows a manual run from the GitHub UI
+
+permissions:
+  contents: write           # needed to commit the updated review queue
+
+concurrency: daily-sync     # never run two syncs at the same time
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline (scrape -> match -> queue proposals)
+        env:
+          BH_TOKEN: ${{ secrets.BH_TOKEN }}   # stored as a GitHub secret, never in code
+          BH_API: https://analyst-assessment-production.up.railway.app/api/v1
+        run: python pipeline.py
+
+      - name: Commit updated review queue
+        run: |
+          git config user.name "bellhaven-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add decisions.db
+          git diff --cached --quiet || git commit -m "Daily sync: update review queue"
+          git push
